@@ -201,7 +201,7 @@ elif page == "Query":
     example_sql = "SELECT 1 AS hello;"
     if loaded_tables:
         first = loaded_tables[0]
-        example_sql = f"-- Example: first 100 rows\nSELECT * FROM {first} LIMIT 100;"
+        example_sql = f"SELECT * FROM {first} LIMIT 100;"
 
     sql = st.text_area("SQL", value=example_sql, height=180, key="sql_box")
 
