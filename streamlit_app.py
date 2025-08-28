@@ -58,7 +58,6 @@ def enforce_limit(sql: str, max_rows: int = 5000) -> str:
     return f"SELECT * FROM ({sql}) AS t LIMIT {int(max_rows)}"
 
 def read_csv_any(path: str) -> pd.DataFrame:
-    # Try default then UTF-8-SIG
     try:
         return pd.read_csv(path)
     except UnicodeDecodeError:
@@ -66,9 +65,7 @@ def read_csv_any(path: str) -> pd.DataFrame:
 
 def _ratio_not_na(series: pd.Series) -> float:
     total = len(series)
-    if total == 0:
-        return 0.0
-    return series.notna().sum() / total
+    return 0.0 if total == 0 else series.notna().sum() / total
 
 def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -78,31 +75,27 @@ def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
     - boolean (True/False)
     """
     out = df.copy()
-
     for col in out.columns:
         s = out[col]
-
-        # skip if already numeric/bool/datetime
         if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_bool_dtype(s) or pd.api.types.is_datetime64_any_dtype(s):
             continue
 
-        # Try numeric
+        # numeric
         num_try = pd.to_numeric(s, errors="coerce")
         if _ratio_not_na(num_try) >= 0.9:
-            # if all integers after dropna -> Int64 else float
             if num_try.dropna().apply(float.is_integer).all():
                 out[col] = num_try.astype("Int64")
             else:
                 out[col] = num_try.astype("float64")
             continue
 
-        # Try datetime
+        # datetime
         dt_try = pd.to_datetime(s, errors="coerce", infer_datetime_format=True)
         if _ratio_not_na(dt_try) >= 0.9:
             out[col] = dt_try
             continue
 
-        # Try boolean (true/false/yes/no/0/1)
+        # boolean
         if s.dtype == object:
             low = s.astype(str).str.strip().str.lower()
             bool_map = {
@@ -113,8 +106,6 @@ def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
             if _ratio_not_na(mapped) >= 0.9:
                 out[col] = mapped.astype("boolean")
                 continue
-
-        # Fallback stays as text/object
     return out
 
 def build_schema_df(conn: sqlite3.Connection, tables: list[str]) -> pd.DataFrame:
@@ -136,19 +127,13 @@ def load_csvs_into_sqlite(csv_paths):
     """
     conn = sqlite3.connect(":memory:")
     loaded = []
-
     for f in csv_paths:
         fname = os.path.basename(f)
         tbl = TABLE_NAME_MAP.get(fname, sanitize_name(fname))
-
         df = read_csv_any(f)
-        df = smart_cast_df(df)  # <- infer numeric/datetime/boolean
-
-        # Write to SQLite; pandas dtype -> SQLite types:
-        # int -> INTEGER, float -> REAL, bool -> INTEGER (0/1), datetime stays TEXT (ISO) as SQLite type storage is dynamic
+        df = smart_cast_df(df)
         df.to_sql(tbl, conn, if_exists="replace", index=False)
         loaded.append(tbl)
-
     schema_df = build_schema_df(conn, loaded)
     return conn, loaded, schema_df
 
@@ -187,7 +172,7 @@ if page == "Schema":
                     st.warning(f"Preview failed: {e}")
 
 # =======================
-# Query Page (chat-like: output above editor)
+# Query Page (chat-like: output above editor; .shape under table)
 # =======================
 elif page == "Query":
     st.header("📝 Run SQL Query (SQLite)")
@@ -196,9 +181,9 @@ elif page == "Query":
     # Output area FIRST (like chat)
     if "last_df" in st.session_state and st.session_state["last_df"] is not None:
         df = st.session_state["last_df"]
+        st.dataframe(df, use_container_width=True)           # <- table first
         rows, cols = df.shape
-        st.success(f"Result: {rows:,} rows × {cols:,} columns")  # <- .shape shown
-        st.dataframe(df, use_container_width=True)
+        st.caption(f"Result shape: {rows:,} rows × {cols:,} columns")  # <- .shape UNDER the table
 
         # Download last result
         buf = io.StringIO()
@@ -216,7 +201,7 @@ elif page == "Query":
     example_sql = "SELECT 1 AS hello;"
     if loaded_tables:
         first = loaded_tables[0]
-        example_sql = f"SELECT * FROM {first} LIMIT 100;"
+        example_sql = f"-- Example: first 100 rows\nSELECT * FROM {first} LIMIT 100;"
 
     sql = st.text_area("SQL", value=example_sql, height=180, key="sql_box")
 
@@ -228,7 +213,7 @@ elif page == "Query":
 
     if clear:
         st.session_state["last_df"] = None
-        st.experimental_rerun()
+        st.rerun()
 
     if run:
         if conn is None:
@@ -242,6 +227,6 @@ elif page == "Query":
                 try:
                     df = pd.read_sql_query(safe_sql, conn)
                     st.session_state["last_df"] = df  # store for display above
-                    st.experimental_rerun()  # refresh to render output above editor
+                    st.rerun()  # refresh to render output above editor
                 except Exception as e:
                     st.error(f"Execution error: {e}")
