@@ -1,94 +1,104 @@
-# streamlit.py — elegant edition (no hints)
+# streamlit.py — polished edition (Schema + Query, no hints)
 import os
 import re
 import io
 import glob
+import time
 import sqlite3
 from typing import List, Tuple, Dict
 
 import pandas as pd
 import streamlit as st
 
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # App Config
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Student SQL Lab",
-    page_icon="✨",
+    page_icon="🚄",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# --------------------------
-# Minimalist Styling (CSS)
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Aesthetic
+# ──────────────────────────────────────────────────────────────────────────────
 st.markdown(
     """
     <style>
-    /* Background gradient */
-    .stApp {
-        background: radial-gradient(1200px 800px at 10% 10%, rgba(180, 220, 255, .18), transparent 40%),
-                    radial-gradient(1000px 600px at 90% 20%, rgba(200, 255, 210, .16), transparent 40%),
-                    linear-gradient(180deg, #0b1220 0%, #0f1424 50%, #101626 100%);
-        color: #EAF2FF;
+    :root {
+      --glass-bg: rgba(255,255,255,.06);
+      --glass-bd: rgba(255,255,255,.10);
+      --ink: #EAF2FF;
+      --ink-soft: #CFE0FF;
     }
-    /* Headings */
-    h1, h2, h3 { letter-spacing: .3px; }
-    /* Glass cards */
+    .stApp {
+        background:
+          radial-gradient(1200px 800px at 12% 8%, rgba(136,195,255,.12), transparent 40%),
+          radial-gradient(1000px 600px at 90% 20%, rgba(197,255,221,.12), transparent 40%),
+          linear-gradient(180deg, #0a0f1f 0%, #0e1324 50%, #101628 100%);
+        color: var(--ink);
+    }
     .glass {
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.08);
-        box-shadow: 0 8px 28px rgba(0,0,0,.25);
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-bd);
         backdrop-filter: blur(10px);
         border-radius: 18px;
-        padding: 18px 20px;
+        padding: 18px 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.25);
     }
-    /* Dataframe container */
+    .badge {
+        display:inline-flex; align-items:center; gap:.5rem;
+        padding:6px 10px; border-radius:999px; font-size:.85rem;
+        background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+        margin-right: .5rem; margin-bottom:.5rem;
+    }
+    .metric {
+        display:flex; flex-direction:column; padding:10px 14px;
+        border-radius:14px; background: rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10);
+        min-width: 140px;
+    }
+    .metric .k { font-size:1.35rem; font-weight:700; color:#fff; }
+    .metric .l { font-size:.85rem; opacity:.8 }
+    .headbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:10px; }
+    .head-title { font-size:1.6rem; font-weight:700; letter-spacing:.3px; }
+    .grid { display:grid; gap:14px }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pill {
+        display:inline-block; padding:6px 10px; border-radius:999px;
+        border:1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08);
+        font-size:.78rem; margin:0 6px 6px 0;
+    }
+    .sqlbox textarea {
+        background: rgba(255,255,255,.06) !important; color: #DDE8FF !important;
+        border-radius: 14px !important; border: 1px solid rgba(255,255,255,.10) !important;
+    }
+    .stButton > button {
+        border-radius:14px; padding:10px 16px;
+        border:1px solid rgba(255,255,255,.18);
+        background: rgba(255,255,255,.09); color: var(--ink);
+    }
+    .stButton > button:hover { background: rgba(255,255,255,.17); }
     [data-testid="stDataFrame"] {
         background: rgba(20,24,40,.55);
         border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,.06);
     }
-    /* Sidebar */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
         border-right: 1px solid rgba(255,255,255,.08);
     }
-    /* Buttons */
-    .stButton>button {
-        border-radius: 14px;
-        padding: 10px 16px;
-        border: 1px solid rgba(255,255,255,0.14);
-        background: rgba(255,255,255,0.08);
-        color: #EAF2FF;
-    }
-    .stButton>button:hover { background: rgba(255,255,255,0.14); }
-    /* Text area (SQL) */
-    textarea {
-        background: rgba(255,255,255,0.06) !important;
-        color: #DDE8FF !important;
-        border-radius: 14px !important;
-        border: 1px solid rgba(255,255,255,0.10) !important;
-    }
-    /* Pills */
-    .pill {
-        display:inline-block; margin: 4px 6px 0 0; padding: 6px 10px;
-        border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
-        background: rgba(255,255,255,.08); font-size: 12px;
-    }
-    /* Subtle caption */
-    .soft { opacity:.8; font-size: 0.88rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Data locations
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 DATA_DIRS = ["data", "/mnt/data"]
 
-# Known names → clean table
 TABLE_NAME_MAP = {
     # CT (transactions)
     "399394_AllTeam_MonsoonSIM_CT_cashOnHand.csv": "cash_on_hand",
@@ -115,9 +125,9 @@ def classify_by_filename(fname: str) -> str:
     if "_COM_" in fname: return "master"
     return "unknown"
 
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 def sanitize_name(path_or_name: str) -> str:
     base = os.path.splitext(os.path.basename(path_or_name))[0]
     base = re.sub(r"[^A-Za-z0-9_]", "_", base)
@@ -192,7 +202,6 @@ def load_csvs_into_sqlite(csv_paths: List[str]) -> Tuple[sqlite3.Connection, Lis
         tbl = TABLE_NAME_MAP.get(fname, sanitize_name(fname))
         df = smart_cast_df(read_csv_any(f))
         df.to_sql(tbl, conn, if_exists="replace", index=False)
-
         cat = classify_by_filename(fname)
         table_category_map[tbl] = cat
         (txn_loaded if cat == "transaction" else master_loaded).append(tbl) if cat in {"transaction","master"} else master_loaded.append(tbl)
@@ -206,97 +215,162 @@ def is_select_only(sql: str) -> bool:
 def enforce_limit(sql: str, max_rows: int = 5000) -> str:
     return sql if re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE) else f"SELECT * FROM ({sql}) AS t LIMIT {int(max_rows)}"
 
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Load
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 csv_files = list_csv_files()
 if csv_files:
     conn, txn_tables, master_tables, schema_df, table_category_map = load_csvs_into_sqlite(csv_files)
 else:
     conn, txn_tables, master_tables, schema_df, table_category_map = None, [], [], pd.DataFrame(), {}
 
-# --------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Sidebar
-# --------------------------
-st.sidebar.markdown("### ✨ Student SQL Lab")
+# ──────────────────────────────────────────────────────────────────────────────
+st.sidebar.markdown("### 🚄 Student SQL Lab")
 page = st.sidebar.segmented_control("View", ["Schema", "Query"], default="Schema")
 st.sidebar.divider()
 
-# Compact table badges
 if conn:
-    st.sidebar.markdown(f'<span class="pill">Masters: {len(master_tables)}</span>', unsafe_allow_html=True)
-    st.sidebar.markdown(f'<span class="pill">Transactions: {len(txn_tables)}</span>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<span class="badge">Masters {len(master_tables)}</span>', unsafe_allow_html=True)
+    st.sidebar.markdown(f'<span class="badge">Transactions {len(txn_tables)}</span>', unsafe_allow_html=True)
     st.sidebar.divider()
-    # Quick filter
     filter_text = st.sidebar.text_input("Filter tables", value="")
+    limit_default = st.sidebar.slider("Limit", 100, 20000, 5000, 100)
 else:
-    filter_text = ""
+    filter_text, limit_default = "", 5000
 
-# --------------------------
-# Schema Page
-# --------------------------
-def render_table_block(title: str, tables: List[str], schema_df: pd.DataFrame, conn: sqlite3.Connection):
-    st.markdown(f"### {title}")
+# ──────────────────────────────────────────────────────────────────────────────
+# Header bar
+# ──────────────────────────────────────────────────────────────────────────────
+left, right = st.columns([5,3])
+with left:
+    st.markdown(
+        f"""
+        <div class="headbar">
+          <div class="head-title">Student SQL Lab</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with right:
+    if conn:
+        colA, colB, colC = st.columns(3)
+        with colA:
+            st.markdown(f'<div class="metric"><div class="k">{len(master_tables)}</div><div class="l">Masters</div></div>', unsafe_allow_html=True)
+        with colB:
+            st.markdown(f'<div class="metric"><div class="k">{len(txn_tables)}</div><div class="l">Transactions</div></div>', unsafe_allow_html=True)
+        with colC:
+            all_cols = schema_df["column_name"].nunique() if not schema_df.empty else 0
+            st.markdown(f'<div class="metric"><div class="k">{all_cols}</div><div class="l">Columns</div></div>', unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Schema
+# ──────────────────────────────────────────────────────────────────────────────
+def render_table_cards(title: str, tables: List[str]):
+    st.markdown(f"#### {title}")
     if filter_text:
         tables = [t for t in tables if filter_text.lower() in t.lower()]
+    if not tables:
+        st.empty()
+        return
     cols = st.columns(3) if len(tables) >= 3 else st.columns(max(1, len(tables)))
     for i, t in enumerate(tables):
-        with cols[i % len(cols)].container():
-            with st.container():
-                st.markdown(f'<div class="glass"><h4 style="margin-top:0">{t}</h4>', unsafe_allow_html=True)
-                try:
-                    prev = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 5;", conn)
-                    st.dataframe(prev, use_container_width=True, height=220)
-                except Exception as e:
-                    st.warning(str(e))
-                if not schema_df.empty:
-                    cols_df = schema_df[schema_df["table_name"] == t][["column_name","data_type","pk"]]
-                    st.dataframe(cols_df.reset_index(drop=True), use_container_width=True, height=220)
-                st.markdown("</div>", unsafe_allow_html=True)
+        with cols[i % len(cols)]:
+            st.markdown('<div class="glass">', unsafe_allow_html=True)
+            st.markdown(f"**{t}**")
+            try:
+                prev = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 5;", conn)
+                st.dataframe(prev, use_container_width=True, height=220)
+            except Exception as e:
+                st.write(f"{e}")
+            if not schema_df.empty:
+                cols_df = schema_df[schema_df["table_name"] == t][["column_name","data_type","pk"]]
+                st.dataframe(cols_df.reset_index(drop=True), use_container_width=True, height=220)
+            st.markdown('</div>', unsafe_allow_html=True)
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Query helpers (history, quick insert)
+# ──────────────────────────────────────────────────────────────────────────────
+if "query_history" not in st.session_state:
+    st.session_state.query_history = []  # list of dicts {sql, rows, ms, at}
+
+def add_history(sql: str, rows: int, ms: int):
+    st.session_state.query_history.insert(0, {"sql": sql, "rows": rows, "ms": ms, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    st.session_state.query_history = st.session_state.query_history[:12]
+
+def table_picker():
+    if not conn: return ""
+    all_tables = (txn_tables or []) + (master_tables or [])
+    t = st.selectbox("Tables", options=all_tables) if all_tables else ""
+    return f"SELECT * FROM {t} LIMIT 100;" if t else "SELECT 1"
+
+def col_browser():
+    if not conn or schema_df.empty: return []
+    return sorted(schema_df["table_name"].unique().tolist())
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pages
+# ──────────────────────────────────────────────────────────────────────────────
 if page == "Schema":
-    st.markdown("<h1>📚 Schema</h1>", unsafe_allow_html=True)
     if not conn:
-        st.error("No CSVs found.")
+        st.markdown('<div class="glass">No data.</div>', unsafe_allow_html=True)
     else:
-        if master_tables:
-            render_table_block("🔷 Masters", master_tables, schema_df, conn)
-        if txn_tables:
-            st.markdown("---")
-            render_table_block("🧾 Transactions", txn_tables, schema_df, conn)
+        render_table_cards("Masters", master_tables)
+        st.markdown('---')
+        render_table_cards("Transactions", txn_tables)
 
-# --------------------------
-# Query Page
-# --------------------------
 elif page == "Query":
-    st.markdown("<h1>📝 Query</h1>", unsafe_allow_html=True)
-
     # Result first
     if "last_df" in st.session_state and st.session_state["last_df"] is not None:
         df = st.session_state["last_df"]
         st.markdown('<div class="glass">', unsafe_allow_html=True)
-        st.dataframe(df, use_container_width=True, height=420)
+        st.dataframe(df, use_container_width=True, height=480)
         r, c = df.shape
-        st.markdown(f'<div class="soft">{r:,} rows × {c:,} columns</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="badge">Rows {r:,}</div><div class="badge">Cols {c:,}</div>', unsafe_allow_html=True)
         buf = io.StringIO();  df.to_csv(buf, index=False, encoding="utf-8-sig")
-        st.download_button("⬇ Download CSV", data=buf.getvalue(), file_name="query_result.csv", mime="text/csv")
+        st.download_button("Download CSV", data=buf.getvalue(), file_name="query_result.csv", mime="text/csv")
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="glass soft">No results yet.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="glass">No results.</div>', unsafe_allow_html=True)
 
-    # Editor
-    example_sql = "SELECT 1 AS hello;"
-    available_tables = (txn_tables or []) + (master_tables or [])
-    if available_tables:
-        example_sql = f"SELECT * FROM {available_tables[0]} LIMIT 100;"
+    # Editor + tools row
+    top_l, top_r = st.columns([3,2])
+    with top_l:
+        default_sql = table_picker()
+    with top_r:
+        cols_list = col_browser()
+        if cols_list:
+            st.multiselect("Columns", options=cols_list, default=[])
 
-    sql = st.text_area("SQL", value=example_sql, height=180, key="sql_box")
+    st.markdown('<div class="glass sqlbox">', unsafe_allow_html=True)
+    sql = st.text_area("SQL", value=default_sql, height=160, key="sql_box")
+    run_col, clear_col, limit_col, _ = st.columns([1,1,2,6])
+    with run_col:
+        run = st.button("Run")
+    with clear_col:
+        clear = st.button("Clear")
+    with limit_col:
+        use_limit = st.checkbox("Auto LIMIT", value=True)
 
-    c1, c2, c3 = st.columns([1,1,6])
-    with c1:
-        run = st.button("▶ Run", type="primary")
-    with c2:
-        clear = st.button("🧹 Clear")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # History
+    if st.session_state.query_history:
+        st.markdown("##### History")
+        st.markdown('<div class="grid cols-2">', unsafe_allow_html=True)
+        for h in st.session_state.query_history:
+            with st.container(border=False):
+                st.markdown('<div class="glass">', unsafe_allow_html=True)
+                st.code(h["sql"], language="sql")
+                st.markdown(
+                    f'<span class="badge">{h["rows"]:,} rows</span>'
+                    f'<span class="badge">{h["ms"]} ms</span>'
+                    f'<span class="badge">{h["at"]}</span>',
+                    unsafe_allow_html=True
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if clear:
         st.session_state["last_df"] = None
@@ -304,16 +378,19 @@ elif page == "Query":
 
     if run:
         if not conn:
-            st.error("No database loaded.")
+            st.error("No database.")
         else:
             sql_clean = sql.strip().rstrip(";").strip()
             if not is_select_only(sql_clean):
                 st.error("Only SELECT / WITH.")
             else:
-                safe_sql = enforce_limit(sql_clean, 5000)
+                q = enforce_limit(sql_clean, limit_default) if use_limit else sql_clean
+                t0 = time.time()
                 try:
-                    df = pd.read_sql_query(safe_sql, conn)
+                    df = pd.read_sql_query(q, conn)
+                    ms = int((time.time() - t0) * 1000)
                     st.session_state["last_df"] = df
+                    add_history(sql_clean, len(df), ms)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Execution error: {e}")
