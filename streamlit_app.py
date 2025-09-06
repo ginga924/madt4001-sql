@@ -1,4 +1,4 @@
-# streamlit.py — polished + robust (Schema + Query, no hints)
+# streamlit.py — polished + robust (Schema + Query)
 import os
 import re
 import io
@@ -194,9 +194,9 @@ def build_schema_df(conn: sqlite3.Connection, tables: List[str]) -> pd.DataFrame
     return pd.DataFrame(rows).sort_values(["table_name", "pk", "column_name"]).reset_index(drop=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Load (robust; cached) + guard
+# Load (conn is a resource → cache_resource)
 # ──────────────────────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner=True)
+@st.cache_resource(show_spinner=True)
 def load_all():
     files = list_csv_files()
     if not files:
@@ -204,7 +204,7 @@ def load_all():
     conn = sqlite3.connect(":memory:")
     txn, master, table_category_map = [], [], {}
 
-    def classify(fn): 
+    def classify(fn):
         return "transaction" if "_CT_" in fn else ("master" if "_COM_" in fn else "master")
 
     for f in files:
@@ -213,7 +213,7 @@ def load_all():
         df.to_sql(name, conn, if_exists="replace", index=False)
         cat = classify(os.path.basename(f))
         table_category_map[name] = cat
-        (txn if cat=="transaction" else master).append(name)
+        (txn if cat == "transaction" else master).append(name)
     schema_df = build_schema_df(conn, txn + master)
     return conn, txn, master, schema_df, table_category_map, files
 
@@ -244,7 +244,7 @@ with st.sidebar.expander("Files", expanded=False):
 # ──────────────────────────────────────────────────────────────────────────────
 # Header bar
 # ──────────────────────────────────────────────────────────────────────────────
-left, right = st.columns([5,3])
+left, right = st.columns([5, 3])
 with left:
     st.markdown(
         """
@@ -265,7 +265,7 @@ with right:
         st.markdown(f'<div class="metric"><div class="k">{all_cols}</div><div class="l">Columns</div></div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Overview helpers (new)
+# Overview helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def table_overview(conn: sqlite3.Connection, t: str) -> dict:
     cur = conn.cursor()
@@ -382,7 +382,7 @@ elif page == "Query":
     default_sql = table_picker_default()
     st.markdown('<div class="glass sqlbox">', unsafe_allow_html=True)
     sql = st.text_area("SQL", value=default_sql, height=160, key="sql_box")
-    run_col, clear_col, limit_col, _ = st.columns([1,1,2,6])
+    run_col, clear_col, limit_col, _ = st.columns([1, 1, 2, 6])
     with run_col:
         run = st.button("Run")
     with clear_col:
