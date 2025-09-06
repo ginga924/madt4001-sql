@@ -1,3 +1,4 @@
+# streamlit.py
 import os
 import re
 import io
@@ -40,20 +41,13 @@ TABLE_NAME_MAP = {
     "399394_Common_MonsoonSIM_COM_vendor.csv": "dim_vendor",
 }
 
-# Simple classifier by filename
+# filename → class
 def classify_by_filename(fname: str) -> str:
     if "_CT_" in fname:
         return "transaction"
     if "_COM_" in fname:
         return "master"
     return "unknown"
-
-# =======================
-# Sidebar (minimal)
-# =======================
-st.sidebar.title("SQL Lab")
-page = st.sidebar.radio("Menu", ["Schema", "Query"])
-st.sidebar.caption("CSV files in ./data and /mnt/data are loaded into an in-memory SQLite DB with clean table names.")
 
 # =======================
 # Helpers
@@ -116,7 +110,6 @@ def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
         # numeric
         num_try = pd.to_numeric(s, errors="coerce")
         if _ratio_not_na(num_try) >= 0.9:
-            # int-like?
             try:
                 if num_try.dropna().apply(lambda x: float(x).is_integer()).all():
                     out[col] = num_try.astype("Int64")
@@ -179,7 +172,6 @@ def load_csvs_into_sqlite(csv_paths: List[str]) -> Tuple[sqlite3.Connection, Lis
         elif category == "master":
             master_loaded.append(tbl)
         else:
-            # default: treat unknowns as master to be safe
             master_loaded.append(tbl)
 
     schema_df = build_schema_df(conn, txn_loaded + master_loaded)
@@ -194,45 +186,78 @@ if not csv_files:
     conn, txn_tables, master_tables, schema_df, table_category_map = None, [], [], pd.DataFrame(), {}
 else:
     conn, txn_tables, master_tables, schema_df, table_category_map = load_csvs_into_sqlite(csv_files)
-    if txn_tables or master_tables:
-        st.sidebar.success(
-            f"Loaded {len(txn_tables)} transaction table(s) and {len(master_tables)} master table(s)."
-        )
-        if txn_tables:
-            st.sidebar.caption("Transactions: " + ", ".join(txn_tables))
-        if master_tables:
-            st.sidebar.caption("Masters: " + ", ".join(master_tables))
-    else:
-        st.sidebar.info("CSV files loaded, but no tables classified. They will appear under 'Masters' by default.")
 
 # =======================
-# Schema Page
+# Query Page (merged as main)
 # =======================
-def render_table_block(title: str, tables: List[str], schema_df: pd.DataFrame, conn: sqlite3.Connection):
-    st.subheader(title)
-    if not tables:
-        st.info("None found.")
-        return
-    for t in tables:
-        with st.expander(f"📄 {t}", expanded=False):
-            if not schema_df.empty:
-                cols_df = schema_df[schema_df["table_name"] == t]
-                st.write("**Columns** (name : type)")
-                st.markdown("\n".join(
-                    f"- `{r.column_name}` : `{r.data_type or 'TEXT'}`"
-                    for r in cols_df.itertuples(index=False)
-                ))
-            try:
-                preview = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 5;", conn)
-                st.dataframe(preview, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Preview failed: {e}")
+st.header("📝 Run SQL Query (SQLite)")
+st.caption("Only **SELECT / WITH** are allowed. A `LIMIT 5000` is added if missing. Trailing `;` is optional.")
 
-if page == "Schema":
-    st.header("📚 Database Schema — SQLite")
+# Little context panel on the right
+with st.sidebar:
+    st.subheader("Tables Loaded")
     if conn is None:
         st.info("Place CSV files in ./data or /mnt/data.")
     else:
-        # Show master and transaction sections separately
-        render_table_block("🔷 Master (Common / Dimensions)", master_tables, schema_df, conn)
-        render_table_block("🧾 Transactions (CT_)", txn_tables, schema_df, conn)
+        if txn_tables:
+            st.markdown("**Transactions (CT_)**")
+            st.write(", ".join(txn_tables))
+        if master_tables:
+            st.markdown("**Masters (COM_ → dim_)**")
+            st.write(", ".join(master_tables))
+        st.divider()
+        st.caption("Tip: Join with keys like product_id, client_id, vendor_id, team_id, location_id, dept_id, day_id.")
+
+# Output area FIRST (chat-like)
+if "last_df" in st.session_state and st.session_state["last_df"] is not None:
+    df = st.session_state["last_df"]
+    st.dataframe(df, use_container_width=True)           # table first
+    rows, cols = df.shape
+    st.caption(f"Result shape: {rows:,} rows × {cols:,} columns")  # shape under table
+
+    # Download last result
+    buf = io.StringIO()
+    df.to_csv(buf, index=False, encoding="utf-8-sig")
+    st.download_button(
+        "⬇ Download CSV of last result",
+        data=buf.getvalue(),
+        file_name="query_result.csv",
+        mime="text/csv",
+    )
+else:
+    st.info("Run a query to see results here.")
+
+# Editor below (chat-like)
+example_sql = "SELECT 1 AS hello;"
+available_tables = (txn_tables or []) + (master_tables or [])
+if available_tables:
+    first = available_tables[0]
+    example_sql = f"SELECT * FROM {first} LIMIT 100;"
+
+sql = st.text_area("SQL", value=example_sql, height=200, key="sql_box")
+
+c1, c2 = st.columns([1,1])
+with c1:
+    run = st.button("▶ Run Query", type="primary")
+with c2:
+    clear = st.button("🧹 Clear")
+
+if clear:
+    st.session_state["last_df"] = None
+    st.rerun()
+
+if run:
+    if conn is None:
+        st.error("No database loaded.")
+    else:
+        sql_clean = sql.strip().rstrip(";").strip()
+        if not is_select_only(sql_clean):
+            st.error("Only SELECT / WITH statements are allowed.")
+        else:
+            safe_sql = enforce_limit(sql_clean, 5000)
+            try:
+                df = pd.read_sql_query(safe_sql, conn)
+                st.session_state["last_df"] = df  # store for display above
+                st.rerun()  # refresh to render output above editor
+            except Exception as e:
+                st.error(f"Execution error: {e}")
