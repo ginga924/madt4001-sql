@@ -236,16 +236,3 @@ if page == "Schema":
         # Show master and transaction sections separately
         render_table_block("🔷 Master (Common / Dimensions)", master_tables, schema_df, conn)
         render_table_block("🧾 Transactions (CT_)", txn_tables, schema_df, conn)
-
-        # Small join hint for students
-        st.markdown("---")
-        st.markdown(
-            """
-**Join Hints**  
-- Typical keys: product_id, client_id, vendor_id, team_id, location_id, dept_id, day_id など。  
-- 例: 売上と商品マスタ  
-```sql
-SELECT s.*, p.product_name, p.category
-FROM sales AS s
-LEFT JOIN dim_product AS p ON s.product_id = p.product_id
-LIMIT 100;
