@@ -1,0 +1,31 @@
+dept,dept_description
+FIN,Finance
+RTL,Retail
+PMN,Procurement
+MKT,Marketing
+FCS,Forecast
+WHS,"Warehouse & Logistics"
+B2B,Wholesales
+ECM,eCommerce
+PRD,Production
+MRP,MRP
+MNT,Maintenance
+HCM,HumanResource
+SRV,Service
+LC11,"Bangkok Retail"
+LC12,"Chiang Mai Retail"
+LC13,"Hat Yai Retail"
+LC14,"Nakhon Ratchasima Retail"
+LC15,"Udon Thani Retail"
+LC16,"Phuket Retail"
+LC17,"Khon Kaen Retail"
+LC21,"Bangkok Warehouse"
+LC22,"Chiang Mai Warehouse"
+LC23,"Hat Yai Warehouse"
+LC24,"Nakhon Ratchasima Warehouse"
+LC25,"Udon Thani Warehouse"
+LC26,"Phuket Warehouse"
+LC27,"Khon Kaen Warehouse"
+SV1,"Marketing Srv"
+SV2,"Franchise Srv"
+SV3,"Technical Srv"
