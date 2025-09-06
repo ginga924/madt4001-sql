@@ -1,4 +1,4 @@
-# streamlit.py — polished edition (Schema + Query, cleaned: no "None", no table filter, no limit UI)
+# streamlit.py — cleaned edition (no stray "None", polished UI)
 import os
 import re
 import io
@@ -61,8 +61,6 @@ st.markdown(
     .metric .l { font-size:.85rem; opacity:.8 }
     .headbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:10px; }
     .head-title { font-size:1.6rem; font-weight:700; letter-spacing:.3px; }
-    .grid { display:grid; gap:14px }
-    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sqlbox textarea {
         background: rgba(255,255,255,.06) !important; color: #DDE8FF !important;
         border-radius: 14px !important; border: 1px solid rgba(255,255,255,.10) !important;
@@ -146,7 +144,8 @@ def read_csv_any(path: str) -> pd.DataFrame:
         return pd.read_csv(path, encoding="utf-8-sig")
 
 def _ratio_not_na(series: pd.Series) -> float:
-    total = len(series);  return 0.0 if total == 0 else series.notna().sum() / total
+    total = len(series)
+    return 0.0 if total == 0 else series.notna().sum() / total
 
 def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
@@ -166,14 +165,16 @@ def smart_cast_df(df: pd.DataFrame) -> pd.DataFrame:
                 pass
         dt_try = pd.to_datetime(s, errors="coerce", infer_datetime_format=True)
         if _ratio_not_na(dt_try) >= 0.9:
-            out[col] = dt_try;  continue
+            out[col] = dt_try
+            continue
         if s.dtype == object:
             low = s.astype(str).str.strip().str.lower()
-            bool_map = {"true": True,"t": True,"yes": True,"y": True,"1": True,
-                        "false": False,"f": False,"no": False,"n": False,"0": False}
+            bool_map = {"true": True, "t": True, "yes": True, "y": True, "1": True,
+                        "false": False, "f": False, "no": False, "n": False, "0": False}
             mapped = low.map(bool_map).where(~low.isna(), other=pd.NA)
             if _ratio_not_na(mapped) >= 0.9:
-                out[col] = mapped.astype("boolean");  continue
+                out[col] = mapped.astype("boolean")
+                continue
     return out
 
 def build_schema_df(conn: sqlite3.Connection, tables: List[str]) -> pd.DataFrame:
@@ -187,19 +188,21 @@ def build_schema_df(conn: sqlite3.Connection, tables: List[str]) -> pd.DataFrame
             pass
     return pd.DataFrame(rows).sort_values(["table_name", "pk", "column_name"]).reset_index(drop=True)
 
-def load_csvs_into_sqlite(csv_paths: List[str]) -> Tuple[sqlite3.Connection, List[str], List[str], pd.DataFrame, Dict[str, str]]:
+def load_csvs_into_sqlite(csv_paths: List[str]) -> Tuple[sqlite3.Connection, List[str], List[str], pd.DataFrame]:
     conn = sqlite3.connect(":memory:")
-    txn_loaded, master_loaded, table_category_map = [], [], {}
+    txn_loaded, master_loaded = [], []
     for f in csv_paths:
         fname = os.path.basename(f)
         tbl = TABLE_NAME_MAP.get(fname, sanitize_name(fname))
         df = smart_cast_df(read_csv_any(f))
         df.to_sql(tbl, conn, if_exists="replace", index=False)
         cat = classify_by_filename(fname)
-        table_category_map[tbl] = cat
-        (txn_loaded if cat == "transaction" else master_loaded).append(tbl) if cat in {"transaction","master"} else master_loaded.append(tbl)
+        if cat == "transaction":
+            txn_loaded.append(tbl)
+        else:
+            master_loaded.append(tbl)
     schema_df = build_schema_df(conn, txn_loaded + master_loaded)
-    return conn, txn_loaded, master_loaded, schema_df, table_category_map
+    return conn, txn_loaded, master_loaded, schema_df
 
 def is_select_only(sql: str) -> bool:
     forbidden = r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|TRUNCATE|ATTACH|DETACH|VACUUM|PRAGMA)\b"
@@ -213,26 +216,25 @@ def enforce_limit(sql: str, max_rows: int = 5000) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 csv_files = list_csv_files()
 if csv_files:
-    conn, txn_tables, master_tables, schema_df, table_category_map = load_csvs_into_sqlite(csv_files)
+    conn, txn_tables, master_tables, schema_df = load_csvs_into_sqlite(csv_files)
 else:
-    conn, txn_tables, master_tables, schema_df, table_category_map = None, [], [], pd.DataFrame(), {}
+    conn, txn_tables, master_tables, schema_df = None, [], [], pd.DataFrame()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Sidebar
+# Sidebar (no empty renders)
 # ──────────────────────────────────────────────────────────────────────────────
 st.sidebar.markdown("### 🚄 Student SQL Lab")
 page = st.sidebar.segmented_control("View", ["Schema", "Query"], default="Schema")
-st.sidebar.divider()
-
 if conn:
-    st.sidebar.markdown(f'<span class="badge">Masters {len(master_tables)}</span>', unsafe_allow_html=True)
-    st.sidebar.markdown(f'<span class="badge">Transactions {len(txn_tables)}</span>', unsafe_allow_html=True)
-    st.sidebar.divider()
+    if len(master_tables) > 0:
+        st.sidebar.markdown(f'<span class="badge">Masters {len(master_tables)}</span>', unsafe_allow_html=True)
+    if len(txn_tables) > 0:
+        st.sidebar.markdown(f'<span class="badge">Transactions {len(txn_tables)}</span>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Header bar
 # ──────────────────────────────────────────────────────────────────────────────
-left, right = st.columns([5,3])
+left, right = st.columns([5, 3])
 with left:
     st.markdown(
         """
@@ -243,23 +245,32 @@ with left:
         unsafe_allow_html=True,
     )
 with right:
-    if conn:
+    if conn and not schema_df.empty:
         colA, colB, colC = st.columns(3)
         with colA:
-            st.markdown(f'<div class="metric"><div class="k">{len(master_tables)}</div><div class="l">Masters</div></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric"><div class="k">{len(master_tables)}</div><div class="l">Masters</div></div>',
+                unsafe_allow_html=True,
+            )
         with colB:
-            st.markdown(f'<div class="metric"><div class="k">{len(txn_tables)}</div><div class="l">Transactions</div></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric"><div class="k">{len(txn_tables)}</div><div class="l">Transactions</div></div>',
+                unsafe_allow_html=True,
+            )
         with colC:
-            all_cols = schema_df["column_name"].nunique() if not schema_df.empty else 0
-            st.markdown(f'<div class="metric"><div class="k">{all_cols}</div><div class="l">Columns</div></div>', unsafe_allow_html=True)
+            all_cols = schema_df["column_name"].nunique()
+            st.markdown(
+                f'<div class="metric"><div class="k">{all_cols}</div><div class="l">Columns</div></div>',
+                unsafe_allow_html=True,
+            )
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Schema
 # ──────────────────────────────────────────────────────────────────────────────
 def render_table_cards(title: str, tables: List[str]):
-    st.markdown(f"#### {title}")
-    if not tables:
+    if len(tables) == 0:
         return
+    st.markdown(f"#### {title}")
     cols = st.columns(3) if len(tables) >= 3 else st.columns(max(1, len(tables)))
     for i, t in enumerate(tables):
         with cols[i % len(cols)]:
@@ -268,12 +279,13 @@ def render_table_cards(title: str, tables: List[str]):
             try:
                 prev = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 5;", conn)
                 st.dataframe(prev, use_container_width=True, height=220)
-            except Exception as e:
-                st.write(f"{e}")
+            except Exception:
+                pass  # do not render errors (prevents 'None'-like noise)
             if not schema_df.empty:
-                cols_df = schema_df[schema_df["table_name"] == t][["column_name","data_type","pk"]]
-                st.dataframe(cols_df.reset_index(drop=True), use_container_width=True, height=220)
-            st.markdown('</div>', unsafe_allow_html=True)
+                cols_df = schema_df[schema_df["table_name"] == t][["column_name", "data_type", "pk"]]
+                if not cols_df.empty:
+                    st.dataframe(cols_df.reset_index(drop=True), use_container_width=True, height=220)
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Query helpers (history)
@@ -282,11 +294,13 @@ if "query_history" not in st.session_state:
     st.session_state.query_history = []
 
 def add_history(sql: str, rows: int, ms: int):
-    st.session_state.query_history.insert(0, {"sql": sql, "rows": rows, "ms": ms, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    st.session_state.query_history.insert(
+        0, {"sql": sql, "rows": rows, "ms": ms, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    )
     st.session_state.query_history = st.session_state.query_history[:12]
 
-def table_picker_default_sql() -> str:
-    if not conn: 
+def default_sql_example() -> str:
+    if not conn:
         return "SELECT 1"
     all_tables = (txn_tables or []) + (master_tables or [])
     return f"SELECT * FROM {all_tables[0]} LIMIT 100;" if all_tables else "SELECT 1"
@@ -297,57 +311,45 @@ def table_picker_default_sql() -> str:
 if page == "Schema":
     if conn:
         render_table_cards("Masters", master_tables)
-        st.markdown('---')
+        st.markdown("---")
         render_table_cards("Transactions", txn_tables)
+    else:
+        st.markdown('<div class="glass">No data found in ./data or /mnt/data.</div>', unsafe_allow_html=True)
 
 elif page == "Query":
-    if "last_df" in st.session_state and st.session_state["last_df"] is not None:
+    # result
+    if st.session_state.get("last_df") is not None:
         df = st.session_state["last_df"]
         st.markdown('<div class="glass">', unsafe_allow_html=True)
         st.dataframe(df, use_container_width=True, height=480)
         r, c = df.shape
-        st.markdown(f'<div class="badge">Rows {r:,}</div><div class="badge">Cols {c:,}</div>', unsafe_allow_html=True)
-        buf = io.StringIO();  df.to_csv(buf, index=False, encoding="utf-8-sig")
+        st.markdown(f'<span class="badge">Rows {r:,}</span><span class="badge">Cols {c:,}</span>', unsafe_allow_html=True)
+        buf = io.StringIO()
+        df.to_csv(buf, index=False, encoding="utf-8-sig")
         st.download_button("Download CSV", data=buf.getvalue(), file_name="query_result.csv", mime="text/csv")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    default_sql = table_picker_default_sql()
-    st.markdown('<div class="glass sqlbox">', unsafe_allow_html=True)
-    sql = st.text_area("SQL", value=default_sql, height=160, key="sql_box")
-    run_col, clear_col, _ = st.columns([1,1,8])
-    with run_col:
+    # editor
+    sql = st.text_area("SQL", value=default_sql_example(), height=160, key="sql_box")
+    c1, c2, _ = st.columns([1, 1, 8])
+    with c1:
         run = st.button("Run")
-    with clear_col:
+    with c2:
         clear = st.button("Clear")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    if st.session_state.query_history:
-        st.markdown("##### History")
-        st.markdown('<div class="grid cols-2">', unsafe_allow_html=True)
-        for h in st.session_state.query_history:
-            with st.container(border=False):
-                st.markdown('<div class="glass">', unsafe_allow_html=True)
-                st.code(h["sql"], language="sql")
-                st.markdown(
-                    f'<span class="badge">{h["rows"]:,} rows</span>'
-                    f'<span class="badge">{h["ms"]} ms</span>'
-                    f'<span class="badge">{h["at"]}</span>',
-                    unsafe_allow_html=True
-                )
-                st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if clear:
         st.session_state["last_df"] = None
         st.rerun()
 
     if run:
-        if conn:
+        if not conn:
+            st.error("No database.")
+        else:
             sql_clean = sql.strip().rstrip(";").strip()
             if not is_select_only(sql_clean):
                 st.error("Only SELECT / WITH.")
             else:
-                q = enforce_limit(sql_clean, 5000)  # fixed auto-limit, no UI
+                q = enforce_limit(sql_clean, 5000)  # fixed auto-limit
                 t0 = time.time()
                 try:
                     df = pd.read_sql_query(q, conn)
@@ -357,5 +359,3 @@ elif page == "Query":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Execution error: {e}")
-        else:
-            st.error("No database.")
