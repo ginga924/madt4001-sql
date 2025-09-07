@@ -1,4 +1,4 @@
-# streamlit.py — cleaned edition (no stray "None", polished UI)
+# streamlit.py — cleaned & persistent SQL text (no stray "None")
 import os
 import re
 import io
@@ -280,7 +280,7 @@ def render_table_cards(title: str, tables: List[str]):
                 prev = pd.read_sql_query(f"SELECT * FROM {t} LIMIT 5;", conn)
                 st.dataframe(prev, use_container_width=True, height=220)
             except Exception:
-                pass  # do not render errors (prevents 'None'-like noise)
+                pass
             if not schema_df.empty:
                 cols_df = schema_df[schema_df["table_name"] == t][["column_name", "data_type", "pk"]]
                 if not cols_df.empty:
@@ -288,22 +288,23 @@ def render_table_cards(title: str, tables: List[str]):
             st.markdown("</div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Query helpers (history)
+# Query helpers (history + persisted SQL text)
 # ──────────────────────────────────────────────────────────────────────────────
 if "query_history" not in st.session_state:
     st.session_state.query_history = []
+if "sql_text" not in st.session_state:
+    def _default_sql() -> str:
+        if not conn:
+            return "SELECT 1"
+        all_tables = (txn_tables or []) + (master_tables or [])
+        return f"SELECT * FROM {all_tables[0]} LIMIT 100;" if all_tables else "SELECT 1"
+    st.session_state.sql_text = _default_sql()
 
 def add_history(sql: str, rows: int, ms: int):
     st.session_state.query_history.insert(
         0, {"sql": sql, "rows": rows, "ms": ms, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     )
     st.session_state.query_history = st.session_state.query_history[:12]
-
-def default_sql_example() -> str:
-    if not conn:
-        return "SELECT 1"
-    all_tables = (txn_tables or []) + (master_tables or [])
-    return f"SELECT * FROM {all_tables[0]} LIMIT 100;" if all_tables else "SELECT 1"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Pages
@@ -317,7 +318,7 @@ if page == "Schema":
         st.markdown('<div class="glass">No data found in ./data or /mnt/data.</div>', unsafe_allow_html=True)
 
 elif page == "Query":
-    # result
+    # show last result
     if st.session_state.get("last_df") is not None:
         df = st.session_state["last_df"]
         st.markdown('<div class="glass">', unsafe_allow_html=True)
@@ -329,23 +330,28 @@ elif page == "Query":
         st.download_button("Download CSV", data=buf.getvalue(), file_name="query_result.csv", mime="text/csv")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # editor
-    sql = st.text_area("SQL", value=default_sql_example(), height=160, key="sql_box")
+    # editor (persisted)
+    st.markdown('<div class="glass sqlbox">', unsafe_allow_html=True)
+    st.text_area("SQL", key="sql_text", height=180)
     c1, c2, _ = st.columns([1, 1, 8])
     with c1:
         run = st.button("Run")
     with c2:
         clear = st.button("Clear")
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    # clear resets but keeps text via default template
     if clear:
         st.session_state["last_df"] = None
+        # keep current text? If you want to reset, uncomment next line:
+        # st.session_state["sql_text"] = _default_sql()
         st.rerun()
 
     if run:
         if not conn:
             st.error("No database.")
         else:
-            sql_clean = sql.strip().rstrip(";").strip()
+            sql_clean = st.session_state["sql_text"].strip().rstrip(";").strip()
             if not is_select_only(sql_clean):
                 st.error("Only SELECT / WITH.")
             else:
